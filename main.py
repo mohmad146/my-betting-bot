@@ -3,13 +3,14 @@ from telebot import types
 import sqlite3
 import random
 
-# --- بياناتك المحدثة ---
+# --- بياناتك الأساسية ---
 TOKEN = "8794915463:AAFbV4970zrM3A4__2yRBAnUPWPB0j6a0XU"
 ADMIN_ID = 8005234076
 MY_USER_URL = "https://t.me/M_2_4_4" 
 
 bot = telebot.TeleBot(TOKEN)
 
+# تهيئة قاعدة البيانات
 def init_db():
     conn = sqlite3.connect('winners.db', check_same_thread=False)
     cursor = conn.cursor()
@@ -26,7 +27,7 @@ def main_keyboard():
         types.InlineKeyboardButton("🎯 الرهانات المفتوحة", callback_data="view_rooms"),
         types.InlineKeyboardButton("➕ إنشاء رهان جديد", callback_data="create_room"),
         types.InlineKeyboardButton("💰 رصيدي", callback_data="my_balance"),
-        types.InlineKeyboardButton("🏦 سحب الأرباح (أقل شيء 5000)", url=f"{MY_USER_URL}?text=أريد_سحب_أرباحي"),
+        types.InlineKeyboardButton("🏦 سحب الأرباح", url=f"{MY_USER_URL}?text=أريد_سحب_أرباحي"),
         types.InlineKeyboardButton("💳 شحن رصيد", url=f"{MY_USER_URL}?text=أريد_شحن_رصيد"),
         types.InlineKeyboardButton("📜 شرح طريقة العمل", callback_data="how_it_works")
     )
@@ -52,12 +53,14 @@ def callback_query(call):
                 "• نحتاج لـ **10 مشاركين** لاكتمال الغرفة.\n"
                 "• يختار البوت **5 فائزين** عشوائياً.\n"
                 "• الفائز ينال مبلغه + 50% ربح.\n"
-                "• السحب يبدأ من **5000 نقطة**.")
+                "• السحب متاح عند تواصلك مع الإدارة.")
         bot.send_message(user_id, text, parse_mode="Markdown")
 
     elif call.data == "my_balance":
         user = conn.cursor().execute("SELECT balance FROM users WHERE id=?", (user_id,)).fetchone()
-        bot.send_message(user_id, f"💳 رصيدك الحالي: {user[0] if user else 0} نقطة")
+        balance = user[0] if user else 0
+        # تعديل لإظهار الـ ID ليسهل نسخه
+        bot.send_message(user_id, f"💰 رصيدك: {balance} نقطة\n🆔 معرفك (ID): `{user_id}`\n\n(اضغط على المعرف لنسخه وإرساله للإدارة عند السحب)", parse_mode="Markdown")
 
     elif call.data == "create_room":
         bot.send_message(user_id, "أرسل مبلغ الرهان الآن (أرقام فقط، الحد الأدنى 1000):")
@@ -66,12 +69,12 @@ def callback_query(call):
     elif call.data == "view_rooms":
         rooms = conn.cursor().execute("SELECT * FROM rooms WHERE count < 10").fetchall()
         if not rooms:
-            bot.send_message(user_id, "لا توجد رهانات مفتوحة حالياً.")
+            bot.send_message(user_id, "لا توجد رهانات مفتوحة حالياً. ابدأ واحداً جديداً!")
         else:
             markup = types.InlineKeyboardMarkup()
             for r in rooms:
                 markup.add(types.InlineKeyboardButton(f"رهان بـ {r[2]} نقطة ({r[4]}/10 مشاركين)", callback_data=f"join_{r[0]}"))
-            bot.send_message(user_id, "اختر الرهان:", reply_markup=markup)
+            bot.send_message(user_id, "اختر الرهان للانضمام:", reply_markup=markup)
 
     elif call.data.startswith("join_"):
         room_id = call.data.split("_")[1]
@@ -81,7 +84,7 @@ def callback_query(call):
         
         participants = room[3].split(",") if room[3] else []
         if str(user_id) in participants:
-            bot.answer_callback_query(call.id, "❌ أنت مشارك بالفعل!")
+            bot.answer_callback_query(call.id, "❌ أنت مشارك بالفعل في هذه الغرفة!")
         elif user_balance < room[2]:
             bot.send_message(user_id, "❌ رصيدك غير كافٍ للمشاركة في هذا الرهان.")
         else:
@@ -90,15 +93,13 @@ def callback_query(call):
             conn.cursor().execute("UPDATE users SET balance = balance - ? WHERE id = ?", (room[2], user_id))
             conn.cursor().execute("UPDATE rooms SET participants = ?, count = ? WHERE id = ?", (new_participants, new_count, room_id))
             conn.commit()
-            bot.send_message(user_id, f"✅ تم انضمامك. المتبقي {10 - new_count} مشاركين.")
+            bot.send_message(user_id, f"✅ تم انضمامك بنجاح. المتبقي {10 - new_count} مشاركين.")
             if new_count == 10: process_draw(room_id, room[2])
     conn.close()
 
 def process_create_room(message):
     try:
-        amount_str = "".join(filter(str.isdigit, message.text))
-        amount = float(amount_str)
-        
+        amount = float("".join(filter(str.isdigit, message.text)))
         if amount < 1000:
             bot.send_message(message.chat.id, "❌ الحد الأدنى للرهان هو 1000 نقطة.")
             return
@@ -112,12 +113,13 @@ def process_create_room(message):
             conn.cursor().execute("UPDATE users SET balance = balance - ? WHERE id = ?", (amount, user_id))
             conn.cursor().execute("INSERT INTO rooms (creator_id, bet_amount, participants, count) VALUES (?, ?, ?, ?)", (user_id, amount, str(user_id), 1))
             conn.commit()
-            bot.send_message(user_id, f"✅ تم إنشاء رهان بـ {amount} نقطة.")
+            bot.send_message(user_id, f"✅ تم إنشاء رهان بـ {amount} نقطة. بانتظار بقية المشاركين.")
         else:
-            bot.send_message(user_id, "❌ رصيدك غير كافٍ لإنشاء الرهان.")
+            # رسالة واضحة عند نقص الرصيد
+            bot.send_message(user_id, "❌ رصيدك غير كافٍ لإنشاء هذا الرهان.")
         conn.close()
     except:
-        bot.send_message(message.chat.id, "⚠️ يرجى إرسال مبلغ صحيح.")
+        bot.send_message(message.chat.id, "⚠️ يرجى إرسال مبلغ صحيح (أرقام فقط).")
 
 def process_draw(room_id, bet_amount):
     conn = sqlite3.connect('winners.db', check_same_thread=False)
@@ -130,31 +132,46 @@ def process_draw(room_id, bet_amount):
     for p in p_list:
         if p in winners:
             conn.cursor().execute("UPDATE users SET balance = balance + ? WHERE id = ?", (win_value, p))
-            bot.send_message(p, f"🎊 مبروك! فزت بـ {win_value} نقطة!")
+            bot.send_message(p, f"🎊 مبروك! لقد اكتملت الغرفة وفزت بـ {win_value} نقطة!")
         else:
-            bot.send_message(p, "😔 حظ أوفر في المرة القادمة.")
+            bot.send_message(p, "😔 حظ أوفر، اكتملت الغرفة ولم يحالفك الحظ هذه المرة.")
             
     conn.cursor().execute("DELETE FROM rooms WHERE id = ?", (room_id,))
     conn.commit()
     conn.close()
 
-@bot.message_handler(commands=['pay', 'cut'])
+# --- أوامر الإدارة (الاستعلام، الشحن، الخصم) ---
+@bot.message_handler(commands=['pay', 'cut', 'user'])
 def admin_commands(message):
     if message.chat.id == ADMIN_ID:
         try:
             parts = message.text.split()
-            cmd, target, amount = parts[0], parts[1], float(parts[2])
+            cmd = parts[0]
+            target_id = parts[1]
             conn = sqlite3.connect('winners.db', check_same_thread=False)
-            if cmd == "/pay":
-                conn.cursor().execute("UPDATE users SET balance = balance + ? WHERE id = ?", (amount, target))
-                bot.send_message(target, f"🎉 تم شحن {amount} نقطة لحسابك!")
-            else:
-                conn.cursor().execute("UPDATE users SET balance = balance - ? WHERE id = ?", (amount, target))
-                bot.send_message(target, f"⚠️ تم خصم {amount} نقطة من حسابك.")
+            
+            if cmd == "/user":
+                user = conn.cursor().execute("SELECT balance FROM users WHERE id=?", (target_id,)).fetchone()
+                if user:
+                    bot.send_message(ADMIN_ID, f"👤 المستخدم: {target_id}\n💰 الرصيد الحالي: {user[0]} نقطة")
+                else:
+                    bot.send_message(ADMIN_ID, "❌ المستخدم غير موجود.")
+                    
+            elif cmd == "/pay":
+                amount = float(parts[2])
+                conn.cursor().execute("UPDATE users SET balance = balance + ? WHERE id = ?", (amount, target_id))
+                bot.send_message(target_id, f"🎉 تم شحن {amount} نقطة إلى حسابك!")
+                bot.send_message(ADMIN_ID, f"✅ تم شحن {amount} للمستخدم {target_id}")
+                
+            elif cmd == "/cut":
+                amount = float(parts[2])
+                conn.cursor().execute("UPDATE users SET balance = balance - ? WHERE id = ?", (amount, target_id))
+                bot.send_message(target_id, f"⚠️ تم خصم {amount} نقطة من حسابك (سحب أرباح).")
+                bot.send_message(ADMIN_ID, f"✅ تم خصم {amount} من المستخدم {target_id}")
+                
             conn.commit()
             conn.close()
-            bot.send_message(ADMIN_ID, "✅ تمت العملية.")
         except:
-            bot.send_message(ADMIN_ID, "⚠️ الصيغة: /pay ID amount")
+            bot.send_message(ADMIN_ID, "⚠️ الصيغة:\n/user ID\n/pay ID amount\n/cut ID amount")
 
 bot.infinity_polling()
