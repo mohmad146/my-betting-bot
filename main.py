@@ -2,8 +2,26 @@ import telebot
 from telebot import types
 import sqlite3
 import random
+import os
+from threading import Thread
 
-# --- بياناتك الأساسية ---
+# --- Flask Workaround لإبقاء الخدمة تعمل على Render ---
+from flask import Flask
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "I am alive"
+
+def run():
+    # Render يوفر PORT تلقائياً في البيئة
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# تشغيل سيرفر Flask في Thread منفصل لعدم تعطيل البوت
+Thread(target=run).start()
+
+# --- إعدادات البوت الأساسية ---
 TOKEN = "8794915463:AAFbV4970zrM3A4__2yRBAnUPWPB0j6a0XU"
 ADMIN_ID = 8005234076
 MY_USER_URL = "https://t.me/M_2_4_4" 
@@ -59,7 +77,6 @@ def callback_query(call):
     elif call.data == "my_balance":
         user = conn.cursor().execute("SELECT balance FROM users WHERE id=?", (user_id,)).fetchone()
         balance = user[0] if user else 0
-        # تعديل لإظهار الـ ID ليسهل نسخه
         bot.send_message(user_id, f"💰 رصيدك: {balance} نقطة\n🆔 معرفك (ID): `{user_id}`\n\n(اضغط على المعرف لنسخه وإرساله للإدارة عند السحب)", parse_mode="Markdown")
 
     elif call.data == "create_room":
@@ -115,7 +132,6 @@ def process_create_room(message):
             conn.commit()
             bot.send_message(user_id, f"✅ تم إنشاء رهان بـ {amount} نقطة. بانتظار بقية المشاركين.")
         else:
-            # رسالة واضحة عند نقص الرصيد
             bot.send_message(user_id, "❌ رصيدك غير كافٍ لإنشاء هذا الرهان.")
         conn.close()
     except:
@@ -140,7 +156,7 @@ def process_draw(room_id, bet_amount):
     conn.commit()
     conn.close()
 
-# --- أوامر الإدارة (الاستعلام، الشحن، الخصم) ---
+# --- أوامر الأدمن (الاستعلام، الشحن، الخصم) ---
 @bot.message_handler(commands=['pay', 'cut', 'user'])
 def admin_commands(message):
     if message.chat.id == ADMIN_ID:
@@ -155,7 +171,7 @@ def admin_commands(message):
                 if user:
                     bot.send_message(ADMIN_ID, f"👤 المستخدم: {target_id}\n💰 الرصيد الحالي: {user[0]} نقطة")
                 else:
-                    bot.send_message(ADMIN_ID, "❌ المستخدم غير موجود.")
+                    bot.send_message(ADMIN_ID, "❌ المستخدم غير موجود في قاعدة البيانات.")
                     
             elif cmd == "/pay":
                 amount = float(parts[2])
@@ -172,6 +188,6 @@ def admin_commands(message):
             conn.commit()
             conn.close()
         except:
-            bot.send_message(ADMIN_ID, "⚠️ الصيغة:\n/user ID\n/pay ID amount\n/cut ID amount")
+            bot.send_message(ADMIN_ID, "⚠️ الصيغة الصحيحة:\n/user ID\n/pay ID amount\n/cut ID amount")
 
 bot.infinity_polling()
